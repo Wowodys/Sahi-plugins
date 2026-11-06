@@ -30,27 +30,38 @@ import java.util.List;
 
 /**
  * The course definition - the EXACT spec data, verbatim, in one place.
- * Nothing in this class is computed or guessed: tiles, chunk ids, region id
- * and object ids are the documented sequence values. The world layer
- * cross-checks the documented chunk ids against coordinate arithmetic once
- * per login (fail visible); this class itself stays pure data so the engine
- * can be exercised without a client.
+ * Nothing in this class is computed or guessed: tiles, arrival points,
+ * chunk ids, region id and object ids are the documented sequence values.
+ * The world layer cross-checks the documented chunk ids (target-tile and
+ * arrival) against coordinate arithmetic once per login (fail visible);
+ * this class itself stays pure data so the engine can be exercised without
+ * a client.
  *
- * The documented sequence (region 10806 throughout):
+ * The documented sequence (region 10806 throughout). Each step carries its
+ * explicit, deterministic ARRIVAL point - the exact tile (x, y, plane) the
+ * player lands on when the step's action completes; the engine advances
+ * strictly on that coordinate:
  *
  *  1. Walk here  - tile (2729, 3489, 0), chunk 698804
+ *                 arrival (2729, 3489, 0), chunk 698804
  *  2. Climb-up   - Wall    14927, tile (2729, 3489, 0), chunk 698804
+ *                 arrival (2729, 3491, 3), chunk 698804  <- the plane 0 -> 3 climb transition
  *  3. Jump       - Gap     14928, tiles 2720..2723 x 3491..3493 z3 (12), chunk 696756, plane-drop reset
+ *                 arrival (2713, 3494, 2), chunk 694708
  *  4. Cross      - Tightrope 14932, tile (2710, 3489, 2), chunk 692660, plane-drop reset
+ *                 arrival (2710, 3480, 2), chunk 692659
  *  5. Jump       - Gap     14929, tiles 2709..2711 x 3476 z2 (3), chunk 692658, plane-drop reset
+ *                 arrival (2710, 3472, 3), chunk 692658
  *  6. Jump       - Gap     14930, tiles 2701..2703 x 3469 z3 (3), chunk 690609
+ *                 arrival (2702, 3465, 2), chunk 690609
  *  7. Jump       - Edge    14931, tiles 2703 x 3464..3465 z2 (2), chunk 690609
+ *                 arrival (2704, 3464, 0), chunk 692657
  *
  * Steps 3, 5, 6 and 7 carry multiple tiles; their array index is the
  * primary-monitor screen-zone index (see AgilityStep's ordering contract and
- * world/ScreenZoneMapper). Steps 1 and 2 share the same tile on purpose: the
- * walk delivers the player to the wall, and the climb is the action taken
- * standing there.
+ * world/ScreenZoneMapper). Steps 1 and 2 share the same target tile on
+ * purpose: the walk delivers the player to the wall, and the climb is the
+ * action taken standing there.
  */
 public final class AgilityCourse
 {
@@ -72,17 +83,21 @@ public final class AgilityCourse
 	{
 		List<AgilityStep> steps = new ArrayList<>(STEP_COUNT);
 
-		// Step 1: Walk here (single tile).
+		// Step 1: Walk here (single tile); arrival = the start tile itself.
 		steps.add(new AgilityStep(
 			1, "Walk here", "", AgilityStep.WALK_OBJECT_ID,
 			false, 698804, COURSE_REGION_ID,
-			tiles(tile(2729, 3489, 0))));
+			tiles(tile(2729, 3489, 0)),
+			tile(2729, 3489, 0), 698804));
 
-		// Step 2: Climb-up on Wall 14927 (single tile).
+		// Step 2: Climb-up on Wall 14927 (single tile). Arrival is the
+		// wall-top landing on plane 3 - the explicit plane 0 -> 3 climb
+		// transition; no heuristic anywhere.
 		steps.add(new AgilityStep(
 			2, "Climb-up", "Wall", 14927,
 			false, 698804, COURSE_REGION_ID,
-			tiles(tile(2729, 3489, 0))));
+			tiles(tile(2729, 3489, 0)),
+			tile(2729, 3491, 3), 698804));
 
 		// Step 3: Jump Gap 14928 - tiles 2720..2723 x 3491..3493 z3 (12).
 		// The spec spells the verb "jump"; display form is "Jump" and the
@@ -91,31 +106,39 @@ public final class AgilityCourse
 		steps.add(new AgilityStep(
 			3, "Jump", "Gap", 14928,
 			true, 696756, COURSE_REGION_ID,
-			rangeTiles(2720, 2723, 3491, 3493, 3)));
+			rangeTiles(2720, 2723, 3491, 3493, 3),
+			tile(2713, 3494, 2), 694708));
 
-		// Step 4: Cross Tightrope 14932 (single tile).
+		// Step 4: Cross Tightrope 14932 (single tile); arrival = the rope's
+		// far end.
 		steps.add(new AgilityStep(
 			4, "Cross", "Tightrope", 14932,
 			true, 692660, COURSE_REGION_ID,
-			tiles(tile(2710, 3489, 2))));
+			tiles(tile(2710, 3489, 2)),
+			tile(2710, 3480, 2), 692659));
 
-		// Step 5: Jump Gap 14929 - tiles 2709..2711 x 3476 z2 (3).
+		// Step 5: Jump Gap 14929 - tiles 2709..2711 x 3476 z2 (3); arrival
+		// lands up a level, on plane 3.
 		steps.add(new AgilityStep(
 			5, "Jump", "Gap", 14929,
 			true, 692658, COURSE_REGION_ID,
-			rangeTiles(2709, 2711, 3476, 3476, 2)));
+			rangeTiles(2709, 2711, 3476, 3476, 2),
+			tile(2710, 3472, 3), 692658));
 
 		// Step 6: Jump Gap 14930 - tiles 2701..2703 x 3469 z3 (3).
 		steps.add(new AgilityStep(
 			6, "Jump", "Gap", 14930,
 			false, 690609, COURSE_REGION_ID,
-			rangeTiles(2701, 2703, 3469, 3469, 3)));
+			rangeTiles(2701, 2703, 3469, 3469, 3),
+			tile(2702, 3465, 2), 690609));
 
-		// Step 7: Jump Edge 14931 - tiles 2703 x 3464..3465 z2 (2).
+		// Step 7: Jump Edge 14931 - tiles 2703 x 3464..3465 z2 (2); arrival
+		// is the ground-level landing that closes the lap.
 		steps.add(new AgilityStep(
 			7, "Jump", "Edge", 14931,
 			false, 690609, COURSE_REGION_ID,
-			rangeTiles(2703, 2703, 3464, 3465, 2)));
+			rangeTiles(2703, 2703, 3464, 3465, 2),
+			tile(2704, 3464, 0), 692657));
 
 		if (steps.size() != STEP_COUNT)
 		{

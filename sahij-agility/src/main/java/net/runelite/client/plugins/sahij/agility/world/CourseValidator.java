@@ -24,6 +24,7 @@
  */
 package net.runelite.client.plugins.sahij.agility.world;
 
+import java.util.Locale;
 import javax.annotation.Nullable;
 import net.runelite.api.Client;
 import net.runelite.api.GameObject;
@@ -32,6 +33,7 @@ import net.runelite.api.ObjectComposition;
 import net.runelite.api.Player;
 import net.runelite.api.Tile;
 import net.runelite.api.TileObject;
+import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.sahij.agility.engine.AgilityCourse;
@@ -46,25 +48,24 @@ import net.runelite.client.plugins.sahij.agility.engine.StepTile;
  * fail visibly:
  *
  *   1. Does the course definition's documented chunk/region data agree with
- *      coordinate arithmetic? ({@link #courseIdentityFailure} - once per
- *      login, a definition-typo tripwire. METADATA ONLY: this check reports
- *      on the definition and never gates any step transition, arrival
- *      match or click - chunk boundaries cut arbitrarily across this
- *      course's geometry and must not gate progression)
+ *      coordinate arithmetic - for every target tile AND every explicit
+ *      arrival point? ({@link #courseIdentityFailure} - once per login, a
+ *      definition-typo tripwire. METADATA ONLY: this check reports on the
+ *      definition and never gates any step transition, arrival match or
+ *      click - chunk boundaries cut arbitrarily across this course's
+ *      geometry and must not gate progression)
  *   2. Is the player inside the course region 10806? (the cheap gate that
  *      keeps the whole subsystem inert elsewhere; region, not chunk)
  *   3. Is a step tile representable in the loaded scene? (a real action can
  *      only be honest for a tile the scene can see)
- *   4. Is the step's exact obstacle object present in the step's ARRIVAL
- *      AREA (world bounds + plane), and which instance is nearest the
- *      zone-selected tile? (exact-ID match, no id substitutions; the scan
- *      covers the documented tile bounding box widened by the arrival
- *      margin, because obstacle objects can sit a tile or two off the
- *      documented standing tiles - and chunk boundaries are irrelevant
- *      here by design)
+ *   4. Is the step's exact obstacle object present on the step's own
+ *      documented tiles, and which instance is nearest the zone-selected
+ *      tile? (exact-ID match, exact documented tiles - no substitutions,
+ *      no widened scans, no margins)
  *   5. Which {@link MenuAction} variant carries the step's action verb for
- *      the obstacle's composition? (case-insensitive match on the
- *      composition's own actions array)
+ *      the obstacle's composition? (two-pass bind - exact case-insensitive,
+ *      then containment - over the composition's own actions array; an
+ *      unbindable verb is the CALLER's refusal, never a guessed dispatch)
  */
 public final class CourseValidator
 {
@@ -78,9 +79,11 @@ public final class CourseValidator
 	// ----- 1. course identity -----
 
 	/**
-	 * Cross-checks every step tile against its documented chunk id and region
-	 * id using {@link RsCoordMath}. Null when the whole definition agrees
-	 * with the arithmetic; otherwise the first mismatch, human-readable
+	 * Cross-checks every step's documented data against coordinate
+	 * arithmetic using {@link RsCoordMath}: each target tile against the
+	 * step's documented chunk/region id, and the step's explicit arrival
+	 * point against its documented arrival chunk. Null when the whole
+	 * definition agrees; otherwise the first mismatch, human-readable
 	 * (surfaced once per login - fail visible, not fail silently).
 	 *
 	 * METADATA ONLY: this is a self-consistency report on the documented
@@ -106,6 +109,18 @@ public final class CourseValidator
 						+ " / chunk " + step.getChunkId();
 				}
 			}
+
+			StepTile arrival = step.getArrivalPoint();
+			int arrivalRegion = RsCoordMath.regionId(arrival.getX(), arrival.getY());
+			int arrivalChunk = RsCoordMath.chunkId(arrival.getX(), arrival.getY());
+			if (arrivalRegion != step.getRegionId()
+				|| arrivalChunk != step.getArrivalChunkId())
+			{
+				return "step " + step.getNumber() + " arrival " + arrival
+					+ " maps to region " + arrivalRegion + " / chunk " + arrivalChunk
+					+ ", documented region " + step.getRegionId()
+					+ " / chunk " + step.getArrivalChunkId();
+			}
 		}
 		return null;
 	}
@@ -123,15 +138,30 @@ public final class CourseValidator
 	// ----- 3. scene representability -----
 
 	/**
-	 * Step tile -&gt; scene coordinates through the API helpers only (never raw
-	 * shifts). Returns {sceneX, sceneY} or null when the tile is outside the
-	 * loaded scene or has no tile on its plane.
+	 * Step tile -&gt; scene coordinates, PLANE-DECOUPLED on purpose. The
+	 * {@code WorldPoint} overload of {@code LocalPoint.fromWorld} hard-returns
+	 * null whenever the client's ACTIVE plane differs from the point's plane
+	 * (its first guard) - and the landings that precede steps 6 and 7 are
+	 * exactly the plane-changing ones (z2 -&gt; z3 and z3 -&gt; z2), where the
+	 * active plane can lag the player for a few ticks. During that window the
+	 * WorldPoint overload made every step tile "unconvertible" and the whole
+	 * obstacle scan report the object as absent. Scene x/y are plane-
+	 * INDEPENDENT arithmetic (world - scene base); the plane only selects the
+	 * tile-array layer, which this method controls explicitly below. Returns
+	 * {sceneX, sceneY} or null when the tile is outside the loaded scene or
+	 * has no tile on its own plane.
 	 */
 	@Nullable
 	public static int[] toSceneCoords(Client client, StepTile tile)
 	{
-		WorldPoint world = new WorldPoint(tile.getX(), tile.getY(), tile.getPlane());
-		LocalPoint local = LocalPoint.fromWorld(client.getTopLevelWorldView(), world);
+		WorldView worldview = client.getTopLevelWorldView();
+
+		// The (wv, x, y) overload carries NO active-plane guard.
+		if (!WorldPoint.isInScene(worldview, tile.getX(), tile.getY()))
+		{
+			return null;
+		}
+		LocalPoint local = LocalPoint.fromWorld(worldview, tile.getX(), tile.getY());
 		if (local == null)
 		{
 			return null;
@@ -144,8 +174,7 @@ public final class CourseValidator
 			return null;
 		}
 
-		Tile sceneTile = client.getTopLevelWorldView().getScene()
-			.getTiles()[tile.getPlane()][sx][sy];
+		Tile sceneTile = worldview.getScene().getTiles()[tile.getPlane()][sx][sy];
 		if (sceneTile == null)
 		{
 			return null;
@@ -204,94 +233,112 @@ public final class CourseValidator
 	}
 
 	/**
-	 * Finds the step's obstacle object (exact id) inside the step's ARRIVAL
-	 * AREA - the documented tile bounding box widened by
-	 * {@link AgilityStep#ARRIVAL_MARGIN_TILES}, on the step's plane - in the
-	 * live scene. Scanning the widened world bounds (never chunk bounds) is
-	 * deliberate: obstacle objects can sit a tile or two off the documented
-	 * standing tiles, and a scan limited to the exact tile set would strand
-	 * the click path exactly like a chunk-matched gate strands progression.
-	 * Every Tile object slot is checked - obstacles are most often
+	 * Finds the step's obstacle object (exact id) on the step's own
+	 * documented tiles - exactly those tiles, never widened - in the live
+	 * scene. Every Tile object slot is checked: obstacles are most often
 	 * {@link GameObject}s, but wall/ground/decorative slots are exact-id
 	 * matched too, so the lookup holds for any slot the course's objects
 	 * live in without inventing placement data.
 	 *
-	 * When several tiles of the area host instances of the id, the one
+	 * Each found instance is cross-checked against its OWN world location:
+	 * the live object's plane must agree with the step's documented plane
+	 * before the instance is accepted. A misresolved or stale instance at
+	 * the chunk/scene edges the late course steps sit on must surface as a
+	 * miss here - never as a dispatch the client silently drops and the
+	 * click's observation can only time out on.
+	 *
+	 * When several of the step's tiles host instances of the id, the one
 	 * NEAREST (Chebyshev) the zone-selected tile wins - the screen-zone
 	 * mapping therefore also disambiguates instances, keeping the human's
-	 * cursor the sole selector. Ties resolve to the first in scan order
-	 * (deterministic).
+	 * cursor the sole selector. Ties resolve to the first in canonical tile
+	 * order (deterministic).
 	 *
 	 * @param preferred the screen-zone-selected tile (see ScreenZoneMapper)
-	 * @return the target to dispatch against, or null when no instance of the
-	 *         exact id exists in the step's arrival area in the loaded scene
+	 * @return the target to dispatch against, or null when no verifiable
+	 *         instance of the exact id exists on the step's tiles in the
+	 *         loaded scene
 	 */
 	@Nullable
 	public static SceneObjectTarget findObjectInStep(Client client, AgilityStep step, StepTile preferred)
 	{
 		SceneObjectTarget best = null;
 		int bestDistance = Integer.MAX_VALUE;
-		int[] box = step.arrivalBox();
 
-		for (int x = box[0]; x <= box[2]; x++)
+		for (StepTile tile : step.getTiles())
 		{
-			for (int y = box[1]; y <= box[3]; y++)
+			int[] scene = toSceneCoords(client, tile);
+			if (scene == null)
 			{
-				StepTile tile = new StepTile(x, y, step.getPlane());
-				int[] scene = toSceneCoords(client, tile);
-				if (scene == null)
-				{
-					continue;
-				}
+				continue;
+			}
 
-				Tile sceneTile = client.getTopLevelWorldView().getScene()
-					.getTiles()[tile.getPlane()][scene[0]][scene[1]];
-				if (sceneTile == null)
-				{
-					continue;
-				}
+			Tile sceneTile = client.getTopLevelWorldView().getScene()
+				.getTiles()[tile.getPlane()][scene[0]][scene[1]];
+			if (sceneTile == null)
+			{
+				continue;
+			}
 
-				boolean present =
-					matches(step.getObjectId(), sceneTile.getWallObject())
-						|| matches(step.getObjectId(), sceneTile.getDecorativeObject())
-						|| matches(step.getObjectId(), sceneTile.getGroundObject())
-						|| anyMatches(step.getObjectId(), sceneTile.getGameObjects());
+			TileObject object = firstInstanceOf(step.getObjectId(), sceneTile);
+			if (object == null)
+			{
+				continue;
+			}
 
-				if (!present)
-				{
-					continue;
-				}
+			// Live cross-check: the object's own reported world location
+			// must sit on the step's documented plane.
+			WorldPoint objectWorld = object.getWorldLocation();
+			if (objectWorld == null || objectWorld.getPlane() != tile.getPlane())
+			{
+				continue;
+			}
 
-				int distance = tile.distanceTo(preferred);
-				if (distance < bestDistance)
-				{
-					bestDistance = distance;
-					best = new SceneObjectTarget(scene[0], scene[1], tile.getPlane(), step.getObjectId());
-				}
+			int distance = tile.distanceTo(preferred);
+			if (distance < bestDistance)
+			{
+				bestDistance = distance;
+				best = new SceneObjectTarget(scene[0], scene[1], tile.getPlane(), step.getObjectId());
 			}
 		}
 		return best;
 	}
 
+	/** First exact-id instance in any of the tile's object slots, or null. */
+	@Nullable
+	private static TileObject firstInstanceOf(int objectId, Tile sceneTile)
+	{
+		TileObject wall = sceneTile.getWallObject();
+		if (matches(objectId, wall))
+		{
+			return wall;
+		}
+		TileObject decorative = sceneTile.getDecorativeObject();
+		if (matches(objectId, decorative))
+		{
+			return decorative;
+		}
+		TileObject ground = sceneTile.getGroundObject();
+		if (matches(objectId, ground))
+		{
+			return ground;
+		}
+		TileObject[] gameObjects = sceneTile.getGameObjects();
+		if (gameObjects != null)
+		{
+			for (TileObject object : gameObjects)
+			{
+				if (matches(objectId, object))
+				{
+					return object;
+				}
+			}
+		}
+		return null;
+	}
+
 	private static boolean matches(int objectId, @Nullable TileObject object)
 	{
 		return object != null && object.getId() == objectId;
-	}
-
-	private static boolean anyMatches(int objectId, @Nullable TileObject[] objects)
-	{
-		if (objects == null)
-		{
-			return false;
-		}
-		for (TileObject object : objects)
-		{
-			if (matches(objectId, object))
-			{
-				return true;
-			}
-		}
-		return false;
 	}
 
 	// ----- 5. action-variant resolution -----
@@ -311,19 +358,12 @@ public final class CourseValidator
 	}
 
 	/**
-	 * Resolves the {@link MenuAction} that carries the step's action verb
-	 * ("Climb-up", "Jump", "Cross") for the obstacle's composition: finds the
-	 * verb in the composition's own actions array (case-insensitive - the
-	 * spec spells step 3's verb "jump") and maps its index to the matching
-	 * menu action type. Impostor-aware: multi-state objects resolve against
-	 * their impostor composition, which is what the client renders.
-	 *
-	 * @return the variant, or null when the composition carries no such verb
-	 *         (the caller falls back to {@code GAME_OBJECT_FIRST_OPTION} and
-	 *         logs it - most agility obstacles expose their verb first)
+	 * Impostor-aware composition resolution: multi-state objects resolve
+	 * against their impostor composition, which is what the client renders
+	 * and offers menu actions for.
 	 */
 	@Nullable
-	public static MenuAction resolveActionVariant(Client client, int objectId, String action)
+	private static ObjectComposition compositionFor(Client client, int objectId)
 	{
 		ObjectComposition composition = client.getObjectDefinition(objectId);
 		if (composition == null)
@@ -338,19 +378,91 @@ public final class CourseValidator
 				composition = impostor;
 			}
 		}
+		return composition;
+	}
+
+	/**
+	 * Resolves the {@link MenuAction} that carries the step's action verb
+	 * ("Climb-up", "Jump", "Cross") for the obstacle's composition, binding
+	 * the verb to the packet interaction type via the composition's own
+	 * actions array. Two deterministic passes: exact case-insensitive match
+	 * first ("jump" binds "Jump" - the spec's step-3 spelling), then a
+	 * containment pass ("Jump" binding "Jump across") for obstacles whose
+	 * verb spelling varies.
+	 *
+	 * @return the variant, or null when the composition carries no bindable
+	 *         verb. A null MUST be refused visibly by the caller
+	 *         ({@link #describeActions}) - dispatching a guessed variant
+	 *         sends a packet for the WRONG verb, which the server executes
+	 *         as a silent no-op: the player never moves and the click's
+	 *         observation can only end in its timeout.
+	 */
+	@Nullable
+	public static MenuAction resolveActionVariant(Client client, int objectId, String action)
+	{
+		ObjectComposition composition = compositionFor(client, objectId);
+		if (composition == null)
+		{
+			return null;
+		}
 
 		String[] actions = composition.getActions();
 		if (actions == null)
 		{
 			return null;
 		}
+
+		String verb = action.toLowerCase(Locale.ENGLISH);
+		int containsIndex = -1;
 		for (int i = 0; i < actions.length && i < 5; i++)
 		{
-			if (actions[i] != null && actions[i].equalsIgnoreCase(action))
+			if (actions[i] == null)
+			{
+				continue;
+			}
+			if (actions[i].equalsIgnoreCase(action))
 			{
 				return variantForIndex(i);
 			}
+			if (containsIndex == -1
+				&& actions[i].toLowerCase(Locale.ENGLISH).contains(verb))
+			{
+				containsIndex = i;
+			}
 		}
-		return null;
+		return containsIndex == -1 ? null : variantForIndex(containsIndex);
+	}
+
+	/**
+	 * Human-readable dump of the obstacle's composition actions (impostor
+	 * aware), for the visible refusal when a step's verb cannot be bound -
+	 * the log line tells you exactly what the object offers instead of a
+	 * silent timeout later.
+	 */
+	public static String describeActions(Client client, int objectId)
+	{
+		ObjectComposition composition = compositionFor(client, objectId);
+		if (composition == null)
+		{
+			return "composition unavailable";
+		}
+
+		String[] actions = composition.getActions();
+		if (actions == null || actions.length == 0)
+		{
+			return "no actions";
+		}
+
+		StringBuilder out = new StringBuilder("[");
+		for (int i = 0; i < actions.length; i++)
+		{
+			if (i > 0)
+			{
+				out.append(", ");
+			}
+			out.append(i).append(':')
+				.append(actions[i] == null ? "null" : actions[i]);
+		}
+		return out.append(']').toString();
 	}
 }

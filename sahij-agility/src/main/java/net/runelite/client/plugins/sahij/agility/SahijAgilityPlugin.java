@@ -33,6 +33,7 @@ import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.MenuAction;
+import net.runelite.api.MenuEntry;
 import net.runelite.api.Player;
 import net.runelite.api.WorldView;
 import net.runelite.api.coords.WorldPoint;
@@ -72,28 +73,32 @@ import org.slf4j.LoggerFactory;
  *   ONE real click (physical mouse, or forwarded by the sibling
  *   kuri-backgroundclicker plugin - this module shares no code and no state
  *   with it and meets it only at the client's own input pipeline)
- *     -&gt; the client's menu processing fires MenuOptionClicked for the
- *        injected step entry
- *     -&gt; the click is consumed; the engine's 1:1 GATES run first (one
- *        dispatched click per game tick, none while the previous dispatch
- *        still awaits server-confirmed movement - click spam can never
- *        become action spam), then the CURRENT step (position-derived, from
- *        the engine's per-tick server observations) resolves its target tile
- *        from the PRIMARY-MONITOR cursor X: N tiles = N equal screen zones,
- *        cursor bracket = tile index (world/ScreenZoneMapper) - the human's
- *        hand position is the selector, never machine RNG
- *     -&gt; exactly ONE real dispatch for that click: the walk step goes
- *        through the scene walk state (the client's own walk processor, the
- *        same path a real tile click takes), obstacle steps go through the
- *        client's object menu action with the obstacle's scene coordinates
- *        (the same packet trail as clicking the object by hand)
+ *     -&gt; the injected step entry: a REAL action row for obstacle steps
+ *        (type/identifier/params copied verbatim from the live scene
+ *        object, verified present and verb-bound at menu build - the same
+ *        entry shape the client's own menu builder produces), or a
+ *        client-local row for the walk step
+ *     -&gt; the engine's 1:1 GATES run at click time (one click per game
+ *        tick, none while the previous one still awaits server-confirmed
+ *        movement - click spam can never become action spam; a gated click
+ *        is consumed so the native pipeline cannot run it either)
+ *     -&gt; the walk click is consumed and its destination goes through the
+ *        scene walk state (the client's own walk processor - the same path
+ *        a real tile click takes; the vanilla walk arm would otherwise
+ *        follow the mouse hover tile). The obstacle click is left
+ *        UNCONSUMED: the client's own object-click pipeline performs it
+ *        natively - its approach routing, its packet, its UI trail. NO
+ *        synthetic dispatch exists anywhere: the server only ever receives
+ *        what a hand click on the obstacle would send, and the cursor's
+ *        primary-monitor bracket (N tiles = N equal screen zones,
+ *        world/ScreenZoneMapper) records the human correlation without
+ *        altering the packet
  *     -&gt; the engine arms a bounded movement observation; the sequence
- *        advances only when the SERVER moves the player into the NEXT
- *        step's arrival area (world-bounds + plane match, widened by the
- *        arrival margin, with the dispatched-click fact verified - chunk
- *        ids are never consulted for progression), and the Z-plane safety
- *        fallback (steps 3-5, plane drops to 0) resets to step 1
- *        immediately.
+ *        advances only when the SERVER moves the player EXACTLY onto the
+ *        completed step's explicit arrival tile (strict x/y/plane match,
+ *        with the dispatched-click fact verified - chunk ids are never
+ *        consulted for progression), and the Z-plane safety fallback
+ *        (steps 3-5, plane drops to 0) resets to step 1 immediately.
  *
  * Nothing runs without the click: no scheduler, no loop, no retries. The
  * engine holds the only game-state opinion; this class is deliberately thin
@@ -221,10 +226,12 @@ public class SahijAgilityPlugin extends Plugin
 	 * Menu injection hook: the menu rebuilds every game tick, and
 	 * MenuEntryAdded fires as it is being built. Gates, in order: logged-in
 	 * with a local player, then the region gate (config) keeping the whole
-	 * subsystem inert outside region 10806. The entry itself is the CURRENT
-	 * step's client-local row (menu package) - the dispatch happens at click
-	 * time, when the cursor zone is known. The dedup guard keeps exactly one
-	 * entry per build.
+	 * subsystem inert outside region 10806. The entry is the current step's
+	 * client-local VISUAL row (a RUNELITE row carries no game packet of its
+	 * own); execution happens at click time - the walk via the scene walk
+	 * state, obstacles via the swap &amp; execute path that dispatches the
+	 * client's OWN native menu entry parameters. The dedup guard keeps
+	 * exactly one entry per build.
 	 */
 	@Subscribe
 	private void onMenuEntryAdded(MenuEntryAdded event)
@@ -253,49 +260,66 @@ public class SahijAgilityPlugin extends Plugin
 	}
 
 	/**
-	 * Optional pinning (config, default ON): the entry is swapped into the
-	 * bottom slot of every menu build for a stable position - the property
-	 * that makes it reliably clickable through the background clicker's
-	 * safe-zone mapping.
+	 * Pinning (config, default ON): the entry is swapped into the FIRST slot
+	 * of every menu build - the top of the rendered menu for visibility, and
+	 * by the client's ordering rules also the LEFT-CLICK DEFAULT action, so
+	 * a plain forwarded click executes the current step. This is a
+	 * deliberate left-click redirect while the plugin is enabled; disabling
+	 * the pin (or the plugin) restores the game's own default action.
 	 */
 	@Subscribe
 	private void onPostMenuSort(PostMenuSort event)
 	{
-		if (!config.pinEntryToBottom())
+		if (!config.pinEntryToTop())
 		{
 			return;
 		}
-		CourseMenuEntries.pinToBottom(client.getMenu());
+		CourseMenuEntries.pinToTop(client.getMenu());
 	}
 
 	/**
-	 * Click interception - the 1:1 contract's enforcement point. The click on
-	 * the injected entry is CONSUMED immediately (a RUNELITE-type row never
-	 * dispatches anything by itself), then the engine's 1:1 gates run FIRST
-	 * (one dispatched click per game tick; no second click while the previous
-	 * one still awaits server-confirmed movement - spam can never become
-	 * action), and only then does exactly one real dispatch run: zone mapping
-	 * -&gt; tile -&gt; validation -&gt; walk state or object menu action. On
-	 * refusal the click stays consumed, the reason is surfaced through the
-	 * engine (fail visible), and nothing is dispatched - an unvalidated or
-	 * ungated request never clicks.
+	 * Click interception - the 1:1 contract's enforcement point. Both step
+	 * flavors arrive as clicks on the injected RUNELITE row and branch by
+	 * the engine's current step:
+	 *
+	 *   WALK: consumed, destination dispatched into the scene walk state
+	 *   (the client's own walk processor - the vanilla walk arm would
+	 *   otherwise follow the mouse hover tile).
+	 *
+	 *   OBSTACLE: SWAP &amp; EXECUTE. The client's own native obstacle row
+	 *   for the step's object is located in the LIVE menu buffer and its
+	 *   exact parameters (type, identifier, param0/param1, option, target)
+	 *   are dispatched VERBATIM through the client's standard action method
+	 *   - the server receives the same interaction a manual click on the
+	 *   native row produces, and the client's standard range/pathfinding
+	 *   handling applies because the dispatch is the client's own. The
+	 *   click event itself stays unconsumed (a RUNELITE row has no native
+	 *   arm to leak); nothing hand-built is ever sent.
+	 *
+	 * The engine's 1:1 gates run first in both flavors (one click per game
+	 * tick; none while the previous one still awaits server-confirmed
+	 * movement).
 	 */
 	@Subscribe
 	private void onMenuOptionClicked(MenuOptionClicked event)
 	{
-		if (!CourseMenuEntries.matchesClick(event))
+		if (!CourseMenuEntries.matchesStepClick(event))
 		{
 			return;
 		}
-		event.consume();
 
-		// Consume-first means the handler below must either dispatch once or
-		// refuse visibly; there is no path that lets the vanilla pipeline
-		// act on this click.
-		handleStepClick();
+		if (engine.getCurrentStep().isWalk())
+		{
+			// Consume-first: the vanilla walk arm must never see this click.
+			event.consume();
+			handleWalkClick();
+			return;
+		}
+
+		handleObstacleClick(event);
 	}
 
-	private void handleStepClick()
+	private void handleWalkClick()
 	{
 		if (client.getGameState() != GameState.LOGGED_IN || client.getLocalPlayer() == null)
 		{
@@ -305,9 +329,6 @@ public class SahijAgilityPlugin extends Plugin
 
 		// 1:1 gates BEFORE any resolution work: one dispatch per game tick,
 		// and none while the previous dispatch still awaits server movement.
-		// MenuOptionClicked is delivered on the client thread and
-		// ClientThread.invoke runs inline there, so the gates see every click
-		// in strict arrival order with no deferred-dispatch race.
 		String gate = engine.clickGateReason();
 		if (gate != null)
 		{
@@ -317,118 +338,129 @@ public class SahijAgilityPlugin extends Plugin
 
 		AgilityStep step = engine.getCurrentStep();
 		PlayerState player = playerState();
-
-		// 1. Cursor -> zone -> tile. Single-tile steps need no pointer read;
-		//    multi-tile steps refuse (never guess) if the pointer is unreadable.
-		int mouseX = -1;
-		if (step.getTiles().size() > 1)
-		{
-			mouseX = readPrimaryMouseX();
-			if (mouseX < 0)
-			{
-				engine.refuseClick("primary-monitor pointer position unavailable");
-				return;
-			}
-		}
-		int tileIndex = ScreenZoneMapper.zoneIndex(mouseX, config.monitorWidth(), step.getTiles().size());
-		StepTile tile = step.getTiles().get(tileIndex);
-
-		// 2. Player-state validation (world package semantics, enforced here
-		//    against the engine's pure values).
 		if (player == null)
 		{
 			engine.refuseClick("local player lost at click time");
 			return;
 		}
+
+		// The walk step is single-tile: no pointer read, the tile is the
+		// destination.
+		StepTile tile = step.soleTile();
 		if (tile.getPlane() != player.getPlane())
 		{
-			engine.refuseClick("step tile plane " + tile.getPlane()
+			engine.refuseClick("walk tile plane " + tile.getPlane()
 				+ " but player is on plane " + player.getPlane());
 			return;
 		}
-		boolean onStepTiles = step.containsTile(player.getX(), player.getY(), player.getPlane());
-		if (!onStepTiles)
-		{
-			if (config.requireStepTile())
-			{
-				engine.refuseClick("player at " + player + " is not on step "
-					+ step.getNumber() + "'s tiles (strict mode)");
-				return;
-			}
-			// Lenient mode: proceed, but say so - never silently.
-			log.info("Sahij Agility: clicking step {} while standing off its tile set at {}",
-				step.getNumber(), player);
-		}
 
-		// 3. Scene representability - a real action can only be honest for a
-		//    tile the loaded scene can see.
 		int[] scene = CourseValidator.toSceneCoords(client, tile);
 		if (scene == null)
 		{
-			engine.refuseClick("zone tile " + tile + " not in the loaded scene");
+			engine.refuseClick("walk tile " + tile + " not in the loaded scene");
 			return;
 		}
 
-		// 4. The single real dispatch for this click. MenuOptionClicked is
-		//    delivered on the client thread, so ClientThread.invoke runs this
-		//    inline, in the same cycle the client samples its action state in.
-		final int fTileIndex = tileIndex;
-		final int fMouseX = mouseX;
-		final PlayerState fPlayer = player;
-		if (step.isWalk())
+		// MenuOptionClicked is delivered on the client thread, so
+		// ClientThread.invoke runs this inline, in the same cycle the client
+		// samples its walk state in.
+		clientThread.invoke(() ->
 		{
+			WorldView worldview = client.getTopLevelWorldView();
+			if (worldview.dispatchDirectWalk(scene[0], scene[1]))
+			{
+				// The client's own walk processor performs the walk from the
+				// injected state - its own packet, pathing and marker.
+				engine.recordClick(engine.getStepIndex(), 0, -1, player);
+			}
+			else
+			{
+				engine.refuseClick("direct walk dispatch unavailable in this client build");
+			}
+			return true; // never re-run
+		});
+	}
+
+	private void handleObstacleClick(MenuOptionClicked event)
+	{
+		// 1:1 gates FIRST. A gated click is CONSUMED - the native pipeline
+		// must not run it either, or the gate would be cosmetic.
+		String gate = engine.clickGateReason();
+		if (gate != null)
+		{
+			event.consume();
+			engine.refuseClick(gate);
+			return;
+		}
+
+		if (client.getGameState() != GameState.LOGGED_IN || client.getLocalPlayer() == null)
+		{
+			event.consume();
+			engine.refuseClick("no local player at click time");
+			return;
+		}
+
+		AgilityStep step = engine.getCurrentStep();
+
+		// SWAP & EXECUTE, primary path: the client's OWN native obstacle row
+		// for this object, live in the current menu build. Its parameters
+		// are exactly what the client assembled for a manual click - copying
+		// them verbatim is what makes the dispatch byte-identical.
+		MenuEntry nativeEntry = CourseMenuEntries.findNativeObstacleEntry(
+			client.getMenu().getMenuEntries(), step.getObjectId());
+
+		// Cursor-bracket telemetry: records the human correlation and the
+		// selected tile index; never alters what is dispatched.
+		int mouseX = readPrimaryMouseX();
+		int tileIndex = mouseX >= 0
+			? ScreenZoneMapper.zoneIndex(mouseX, config.monitorWidth(), step.getTiles().size())
+			: 0;
+
+		if (nativeEntry != null)
+		{
+			// Dispatch through the client's standard action method with the
+			// native row's own fields. MenuOptionClicked is delivered on the
+			// client thread, so the invoke runs inline - the same cycle the
+			// client processes its own actions in, range/pathfinding rules
+			// included. The click event stays unconsumed: a RUNELITE row has
+			// no native arm, so exactly ONE game action follows.
 			clientThread.invoke(() ->
 			{
-				WorldView worldview = client.getTopLevelWorldView();
-				if (worldview.dispatchDirectWalk(scene[0], scene[1]))
-				{
-					// The client's own walk processor performs the walk from
-					// the injected state - its own packet, pathing and marker.
-					engine.recordClick(engine.getStepIndex(), fTileIndex, fMouseX, fPlayer);
-				}
-				else
-				{
-					engine.refuseClick("direct walk dispatch unavailable in this client build");
-				}
+				client.menuAction(nativeEntry.getParam0(), nativeEntry.getParam1(),
+					nativeEntry.getType(), nativeEntry.getIdentifier(), -1,
+					nativeEntry.getOption(), nativeEntry.getTarget());
+				engine.recordClick(engine.getStepIndex(), tileIndex, mouseX, playerState());
 				return true; // never re-run
 			});
 			return;
 		}
 
-		// Obstacle step: exact-id lookup on the step's own tiles; the
-		// zone-selected tile also disambiguates multiple instances (nearest
-		// wins), so the cursor stays the sole selector.
-		SceneObjectTarget target = CourseValidator.findObjectInStep(client, step, tile);
-		if (target == null)
+		// Fallback when the current menu build carries no native row for the
+		// object (the click opened away from the obstacle): resolve the live
+		// object and the composition-bound verb - still the client's own
+		// action method, still verified parameters, never a guess.
+		SceneObjectTarget target = CourseValidator.findObjectInStep(client, step, step.soleTile());
+		MenuAction variant = target == null
+			? null
+			: CourseValidator.resolveActionVariant(client, step.getObjectId(), step.getAction());
+		if (target == null || variant == null)
 		{
-			engine.refuseClick("object " + step.getObjectId() + " ("
-				+ step.getTarget() + ") not found on step " + step.getNumber()
-				+ "'s tiles in the loaded scene");
+			event.consume();
+			engine.refuseClick("no native menu entry for object " + step.getObjectId()
+				+ " and no verifiable fallback ("
+				+ (target == null
+					? "object not on step " + step.getNumber() + "'s tiles"
+					: "\"" + step.getAction() + "\" not bindable - offers "
+						+ CourseValidator.describeActions(client, step.getObjectId()))
+				+ ")");
 			return;
-		}
-
-		MenuAction variant = CourseValidator.resolveActionVariant(client, step.getObjectId(), step.getAction());
-		final MenuAction dispatchType;
-		if (variant == null)
-		{
-			// Fail visible into the log, dispatch the first variant - agility
-			// obstacles expose their verb as the first composition action.
-			dispatchType = MenuAction.GAME_OBJECT_FIRST_OPTION;
-			log.warn("Sahij Agility: action \"{}\" not found on object {} composition; "
-				+ "dispatching first option", step.getAction(), step.getObjectId());
-		}
-		else
-		{
-			dispatchType = variant;
 		}
 
 		clientThread.invoke(() ->
 		{
-			// The client's own object action dispatch - the ordinary packet
-			// trail of clicking the obstacle by hand, at its scene tile.
-			client.menuAction(target.getSceneX(), target.getSceneY(), dispatchType,
+			client.menuAction(target.getSceneX(), target.getSceneY(), variant,
 				step.getObjectId(), -1, step.getAction(), step.getTarget());
-			engine.recordClick(engine.getStepIndex(), fTileIndex, fMouseX, fPlayer);
+			engine.recordClick(engine.getStepIndex(), tileIndex, mouseX, playerState());
 			return true; // never re-run
 		});
 	}

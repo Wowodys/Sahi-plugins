@@ -85,17 +85,18 @@ public interface SahijAgilityConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "pinEntryToBottom",
-		name = "Pin menu entry to bottom",
-		description = "Swap the entry into the menu's bottom slot every build "
-			+ "so it sits at a stable screen position - that stability is what "
-			+ "makes it reliably clickable through the background clicker's "
-			+ "safe-zone mapping. This is NOT a left-click hijack: the default "
-			+ "action stays whatever the game shows for what you hover",
+		keyName = "pinEntryToTop",
+		name = "Pin menu entry to top",
+		description = "Swap the entry into the menu's FIRST slot (top) every "
+			+ "build for visibility. By the client's ordering rules the first "
+			+ "slot is also the LEFT-CLICK DEFAULT action, so a plain click "
+			+ "(hand or background-clicker forwarded) executes the current "
+			+ "step without opening the menu - every ordinary left-click on "
+			+ "the world is redirected to the step action while this is on",
 		position = 2,
 		section = behaviourSection
 	)
-	default boolean pinEntryToBottom()
+	default boolean pinEntryToTop()
 	{
 		return true;
 	}

@@ -31,21 +31,25 @@ package net.runelite.client.plugins.sahij.agility.engine;
  * WHICH step of {@link AgilityCourse} is next, derived from the server's own
  * position reports - never from timers.
  *
- * Transition rule (world bounds + plane, chunk-blind): a step is current
- * while the player stands in its ARRIVAL AREA - the bounding box of its
- * tiles widened by {@link AgilityStep#ARRIVAL_MARGIN_TILES}, matched on the
- * step's plane ({@link AgilityStep#containsArrival}). CHUNK IDS ARE NEVER
- * CONSULTED: chunk boundaries cut arbitrarily across this course's geometry
- * (the chunk changes mid-way between the step-2 wall climb and the step-3
- * gap), so a chunk comparison here would strand the sequence - they exist on
- * the step definition as metadata only. A FORWARD transition (step k to its
- * successor) additionally verifies that a click for step k was DISPATCHED -
- * advancement is always "dispatched the action AND arrived in the successor's
- * world bounds", never a geometric gate alone. Any other placement change
- * (manual walk-back, login mid-course, recovery from an unwatched fall) is a
- * POSITIONAL RESYNC to the last step whose arrival area contains the player:
- * visibly labeled, never a dispatch, and never stuck. Off every arrival area
- * (mid-obstacle animation, between platforms): the current step holds.
+ * Transition rule (EXPLICIT ARRIVAL POINTS - deterministic, chunk-blind):
+ * every step carries one documented arrival tile (x, y AND plane) - the
+ * exact position its action lands on - and the engine advances STRICTLY on
+ * equality against it. A FORWARD transition (step k to its successor) fires
+ * when a click for step k was DISPATCHED and the player's world location is
+ * exactly step k's arrival point: dispatched the action AND arrived at the
+ * documented coordinate, nothing fuzzier. There are no margins, no bounding
+ * boxes, no auto-calculated ranges and no plane heuristics anywhere in this
+ * class - vertical obstacles are handled by the data itself (step 2's
+ * arrival (2729, 3491, 3) IS the plane-3 wall-top landing of the plane-0
+ * climb, so the 0 -&gt; 3 transition is an ordinary strict match). CHUNK IDS
+ * ARE NEVER CONSULTED: they exist on the step definitions as metadata only.
+ *
+ * A player standing exactly on some OTHER step's arrival point (manual
+ * walk-back, login mid-course, recovery from an unwatched step-6/7 fall) is
+ * a POSITIONAL RESYNC to that arrival's successor: visibly labeled, never
+ * counted as a confirmed step, never a dispatch, never stuck. On no arrival
+ * point at all (mid-obstacle animation, between platforms, mid-climb): the
+ * current step holds - the sequence never advances on speculation.
  *
  * Z-plane safety fallback (the spec's rule, verbatim): while a step flagged
  * {@link AgilityStep#isPlaneDropResets()} is current - steps 3, 4 and 5 -
@@ -213,61 +217,69 @@ public final class AgilitySequenceEngine
 			}
 		}
 
-		// 3. Step matching on WORLD BOUNDS + PLANE ONLY (chunk-blind): the
-		// last step whose ARRIVAL AREA contains the player. Forward
-		// advancement to the successor additionally requires the dispatched-
-		// click fact for the current step; any other placement change is a
-		// positional resync (recovery - visibly labeled, never a dispatch,
-		// never stuck). No arrival match keeps the current step: mid-
-		// animation or off-course is not a transition.
-		int arrivalIndex = lastArrivalStep(now);
-		if (arrivalIndex != -1 && arrivalIndex != stepIndex)
+		// 3. Step matching on EXPLICIT ARRIVAL POINTS (strict, chunk-blind):
+		// the player's exact location (x, y AND plane) equal to a step's
+		// documented arrival point means that step completed - its successor
+		// becomes current. Forward advancement additionally requires the
+		// dispatched-click fact for the current step; any other arrival
+		// match is a positional resync (recovery - visibly labeled, never a
+		// dispatch, never stuck). On no arrival point at all, the current
+		// step holds: mid-animation, mid-climb or off-course is not a
+		// transition.
+		int targetStep = stepAfterArrival(now);
+		if (targetStep != -1 && targetStep != stepIndex)
 		{
 			int fromStep = getCurrentStep().getNumber();
-			boolean forward = isForwardTransition(arrivalIndex)
+			boolean forward = isForwardTransition(targetStep)
 				&& dispatchedCurrentStep;
 
 			if (stepIndex == course.lastStepIndex())
 			{
-				// Left step 7's arrival area into another step's: the
-				// circuit is closed. Fall-vs-jump is indistinguishable from
-				// position alone (see class javadoc) - the lap counts either
-				// way, visibly.
+				// Left step 7 by arriving somewhere documented: the circuit
+				// is closed. Fall-vs-jump is indistinguishable from position
+				// alone (see class javadoc) - the lap counts either way,
+				// visibly.
 				laps++;
 			}
-			stepIndex = arrivalIndex;
+			stepIndex = targetStep;
 			dispatchedCurrentStep = false;
 			synced = true;
 			lastOutcome = forward
 				? "advanced: step " + fromStep + " -> " + getCurrentStep().getNumber()
-					+ " (dispatched click + arrival " + now + ", chunk-blind)"
+					+ " (dispatched click + exact arrival " + now + ")"
 				: "position resync: step " + getCurrentStep().getNumber()
-					+ " (" + now + ", no dispatched click for the sequence path)";
+					+ " (exact arrival " + now + ", no dispatched click)";
 		}
-		else if (arrivalIndex != -1)
+		else if (targetStep != -1)
 		{
 			synced = true;
 		}
 	}
 
 	/**
-	 * Index of the LAST step whose ARRIVAL AREA (world bounds + plane,
-	 * chunk-blind) contains the position, or -1. Order matters exactly once
-	 * in this course - steps 1 and 2 share the start area, and standing
-	 * there must mean "climb next" (step 2), not "walk again" (step 1).
+	 * The step that should be current given the position, or -1: the
+	 * successor of the LAST step whose documented arrival point the player
+	 * stands on EXACTLY (x, y and plane all equal). All seven arrival
+	 * points are distinct tiles, so the last-match rule is a determinism
+	 * guard, not an ambiguity resolver.
 	 */
-	private int lastArrivalStep(PlayerState now)
+	private int stepAfterArrival(PlayerState now)
 	{
-		int found = -1;
-		for (int i = 0; i < AgilityCourse.STEP_COUNT; i++)
+		int target = -1;
+		for (int k = 0; k < AgilityCourse.STEP_COUNT; k++)
 		{
-			AgilityStep step = course.step(i);
-			if (step.containsArrival(now.getX(), now.getY(), now.getPlane()))
+			if (course.step(k).isAtArrival(now.getX(), now.getY(), now.getPlane()))
 			{
-				found = i;
+				target = (k + 1) % AgilityCourse.STEP_COUNT;
 			}
 		}
-		return found;
+		return target;
+	}
+
+	/** Index of the natural successor of the current step (wraps 7 -&gt; 1). */
+	private int successorIndex()
+	{
+		return (stepIndex + 1) % AgilityCourse.STEP_COUNT;
 	}
 
 	/**
@@ -278,7 +290,7 @@ public final class AgilitySequenceEngine
 	 */
 	private boolean isForwardTransition(int arrivalIndex)
 	{
-		if (arrivalIndex == (stepIndex + 1) % AgilityCourse.STEP_COUNT)
+		if (arrivalIndex == successorIndex())
 		{
 			return true;
 		}
