@@ -104,13 +104,15 @@ public final class AgilitySequenceEngine
 {
 	/**
 	 * How many GameTicks a dispatched click may take to produce visible
-	 * movement. Generous on purpose: obstacle animations hold the player on
-	 * the dispatch tile for several ticks before the server moves them (the
-	 * wall climb and tightrope are the slow ones). Observation only - nothing
-	 * is dispatched inside this window; ticks are the game's metronome, and
+	 * movement: 3 ticks (~1.8s) covers an action-to-movement round trip -
+	 * an accepted obstacle action starts moving the player (or routing them
+	 * toward the object) within a couple of ticks, so silence past 3 is a
+	 * dead click, not a slow one. The short horizon also releases the 1:1
+	 * armed gate quickly for the next click. Observation only - nothing is
+	 * dispatched inside this window; ticks are the game's metronome, and
 	 * using them for checking is not action.
 	 */
-	private static final int CONFIRM_HORIZON_TICKS = 10;
+	private static final int CONFIRM_HORIZON_TICKS = 3;
 
 	private final AgilityCourse course;
 

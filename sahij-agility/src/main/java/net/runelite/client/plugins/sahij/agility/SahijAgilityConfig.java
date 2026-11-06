@@ -87,12 +87,14 @@ public interface SahijAgilityConfig extends Config
 	@ConfigItem(
 		keyName = "pinEntryToTop",
 		name = "Pin menu entry to top",
-		description = "Swap the entry into the menu's FIRST slot (top) every "
-			+ "build for visibility. By the client's ordering rules the first "
-			+ "slot is also the LEFT-CLICK DEFAULT action, so a plain click "
-			+ "(hand or background-clicker forwarded) executes the current "
-			+ "step without opening the menu - every ordinary left-click on "
-			+ "the world is redirected to the step action while this is on",
+		description = "Swap the entry into the menu's LAST array slot every "
+			+ "build - the slot this client renders at the TOP and treats as "
+			+ "the LEFT-CLICK DEFAULT (first-party MenuEntrySwapper promotes "
+			+ "entries the same way; index 0 renders at the bottom). A plain "
+			+ "click (hand or background-clicker forwarded) then executes the "
+			+ "current step without the cursor hovering the obstacle and "
+			+ "without opening the menu. Every ordinary left-click on the "
+			+ "world is redirected to the step action while this is on",
 		position = 2,
 		section = behaviourSection
 	)

@@ -31,6 +31,7 @@ import net.runelite.api.GameObject;
 import net.runelite.api.MenuAction;
 import net.runelite.api.ObjectComposition;
 import net.runelite.api.Player;
+import net.runelite.api.Point;
 import net.runelite.api.Tile;
 import net.runelite.api.TileObject;
 import net.runelite.api.WorldView;
@@ -240,12 +241,21 @@ public final class CourseValidator
 	 * matched too, so the lookup holds for any slot the course's objects
 	 * live in without inventing placement data.
 	 *
+	 * The returned target carries the object's OWN scene coordinates: for
+	 * {@link GameObject}s that is {@link GameObject#getSceneMinLocation()}
+	 * - the exact tile the client's own menu rows carry as param0/param1 -
+	 * not the scanned step tile. An action dispatched at any other tile of
+	 * a multi-tile object can be rejected server-side as a silent no-op,
+	 * which the click's movement observation can only report as a timeout
+	 * (the step 6/7 failure mode: those objects' documented standing tiles
+	 * differ from their min-location tile). Wall/decorative/ground slots
+	 * keep the scanned tile (their location IS the tile).
+	 *
 	 * Each found instance is cross-checked against its OWN world location:
 	 * the live object's plane must agree with the step's documented plane
 	 * before the instance is accepted. A misresolved or stale instance at
 	 * the chunk/scene edges the late course steps sit on must surface as a
-	 * miss here - never as a dispatch the client silently drops and the
-	 * click's observation can only time out on.
+	 * miss here - never as a dispatch the client silently drops.
 	 *
 	 * When several of the step's tiles host instances of the id, the one
 	 * NEAREST (Chebyshev) the zone-selected tile wins - the screen-zone
@@ -293,11 +303,27 @@ public final class CourseValidator
 				continue;
 			}
 
+			// The object's OWN scene coordinates - the client's menu rows
+			// for game objects carry the min-location tile, so the action
+			// must be addressed there, not at whichever standing tile the
+			// scan happened to find it on.
+			int targetX = scene[0];
+			int targetY = scene[1];
+			if (object instanceof GameObject)
+			{
+				Point min = ((GameObject) object).getSceneMinLocation();
+				if (min != null)
+				{
+					targetX = min.getX();
+					targetY = min.getY();
+				}
+			}
+
 			int distance = tile.distanceTo(preferred);
 			if (distance < bestDistance)
 			{
 				bestDistance = distance;
-				best = new SceneObjectTarget(scene[0], scene[1], tile.getPlane(), step.getObjectId());
+				best = new SceneObjectTarget(targetX, targetY, tile.getPlane(), step.getObjectId());
 			}
 		}
 		return best;

@@ -34,33 +34,43 @@ import net.runelite.client.plugins.sahij.agility.engine.AgilityStep;
  * All menu-array work for the course's step entry, isolated from the state
  * machine (engine package) and the coordinate work (world package).
  *
- * The injected row is a client-local VISUAL entry ({@code MenuAction.RUNELITE}):
- * it renders in the ordinary menu and is pinned to the TOP slot (index 0) for
- * visibility - which also makes it the left-click default, so a plain click
- * (hand or background-clicker forwarded) executes the current step. A
- * RUNELITE-type row never emits a game packet by itself; execution is the
- * plugin's SWAP &amp; EXECUTE at click time:
+ * TWO entry flavors, matched to how the client actually executes clicks:
  *
- *   1. locate the client's OWN native obstacle row for the step's object in
- *      the live menu buffer ({@link #findNativeObstacleEntry}) - the row the
- *      client assembled from the hovered object, with the exact parameters
- *      it would dispatch for a manual click;
- *   2. dispatch that native action through the client's standard action
- *      method with the parameters copied VERBATIM from the native row -
- *      type (packet interaction type), identifier (object id), param0/param1
- *      (scene tile), even the option/target strings. The server receives a
- *      byte-identical interaction, and the client's standard range/
- *      pathfinding handling applies because the dispatch goes through the
- *      client's own processing path, not a hand-built imitation of it.
+ * OBSTACLE (steps 2-7): a REAL {@code GAME_OBJECT_*} action row whose
+ * parameters are the client's own - copied VERBATIM from the native menu
+ * row for the object when the current build carries one (cursor over the
+ * object), otherwise derived from the LIVE scene object (its own scene
+ * min-location via the world layer, plus the composition-bound action
+ * variant). Because the row is a real game action, the client both renders
+ * it like any obstacle option AND accepts it as the LEFT-CLICK DEFAULT -
+ * which is what makes forwarded clicks work WITHOUT the cursor hovering
+ * the tile: a {@code RUNELITE}-typed row is never a default candidate, so
+ * with one pinned, forwarded left-clicks silently executed the native entry
+ * under the cursor instead (the exact hover-dependence this design
+ * removes). The click is left UNCONSUMED: the client's native object arm
+ * performs the interaction with the entry's parameters - its range/
+ * pathfinding routing, its packet, its UI trail. Nothing synthetic is ever
+ * sent.
  *
- * The walk step keeps the kuri-oneclick-proven variant: consume the click
- * and dispatch the destination into the scene walk state (the vanilla walk
- * arm sources its destination from the mouse hover tile, so an unconsumed
- * walk entry would walk wherever the cursor happens to be).
+ * WALK (step 1): a client-local row ({@code MenuAction.RUNELITE}).
+ * The click is CONSUMED and the destination dispatched into the scene walk
+ * state ({@code WorldView#dispatchDirectWalk}) - the client's own walk
+ * processor performs it. The indirection is REQUIRED: this client's walk
+ * arm sources its destination from the mouse hover tile, not the entry's
+ * parameters (the kuri-oneclick precedent), and a WALK-typed row would
+ * otherwise walk wherever the cursor happens to be.
+ *
+ * PIN ORDERING - the LAST array slot is the TOP-rendered, left-click
+ * DEFAULT slot in this client: first-party RuneLite promotes entries
+ * exactly this way (MenuEntrySwapper's bankModeSwap swaps the chosen entry
+ * with {@code menuEntries[length - 1]} "so it doesn't get sorted later").
+ * Index 0 is the BOTTOM of the rendered menu - swapping there pins the
+ * entry to the bottom, the inversion observed in the field. Pinning is
+ * therefore a swap to the LAST slot (see {@link #pinToTop}).
  *
  * One marker constant is used in every place the entry is touched:
  * injection option text, the dedup guard, the pin finder and the click
- * matcher (drift between them is the classic silent bug).
+ * matchers (drift between them is the classic silent bug).
  */
 public final class CourseMenuEntries
 {
@@ -99,13 +109,12 @@ public final class CourseMenuEntries
 	}
 
 	/**
-	 * Appends the current step's client-local visual entry. All parameters
-	 * are neutral - a RUNELITE row carries no game action of its own; the
-	 * real action is dispatched at click time by the swap &amp; execute
-	 * handler. The option text carries the step number so the row reads as
+	 * Appends the WALK step's client-local entry. All parameters are neutral
+	 * (the destination is dispatched into the scene walk state at click
+	 * time); the option text carries the step number so the row reads as
 	 * the sequence position it is.
 	 */
-	public static void inject(Menu menu, AgilityStep step)
+	public static void injectWalk(Menu menu, AgilityStep step)
 	{
 		menu.createMenuEntry(-1)
 			.setOption(optionFor(step))
@@ -117,36 +126,41 @@ public final class CourseMenuEntries
 			.setForceLeftClick(false);
 	}
 
-	/** Whether a MenuOptionClicked event is a click on our injected entry. */
-	public static boolean matchesStepClick(MenuOptionClicked event)
+	/**
+	 * Appends an OBSTACLE step's REAL action entry. The dispatch-relevant
+	 * fields are the client's own: {@code variant} (packet interaction
+	 * type), {@code sceneX}/{@code sceneY} (param0/param1 - the object's
+	 * scene tile) and {@code objectId} (identifier). A click on this row
+	 * runs through the client's native object-click path with exactly these
+	 * parameters, and the row is a valid LEFT-CLICK DEFAULT candidate - so a
+	 * plain forwarded click executes the step without the cursor hovering
+	 * the obstacle and without opening the menu.
+	 */
+	public static void injectObstacle(Menu menu, AgilityStep step, MenuAction variant,
+		int sceneX, int sceneY, int objectId)
+	{
+		menu.createMenuEntry(-1)
+			.setOption(optionFor(step))
+			.setTarget(step.getTarget())
+			.setType(variant)
+			.setIdentifier(objectId)
+			.setParam0(sceneX)
+			.setParam1(sceneY)
+			.setForceLeftClick(false);
+	}
+
+	/** Whether a clicked event is the WALK flavor of our entry. */
+	public static boolean matchesWalkClick(MenuOptionClicked event)
 	{
 		return event.getMenuAction() == MenuAction.RUNELITE
 			&& event.getMenuOption().contains(MENU_MARKER);
 	}
 
-	/**
-	 * Locates the client's OWN native obstacle row for the exact object id
-	 * in the live menu buffer: a {@code GAME_OBJECT_*} entry whose
-	 * identifier equals the id - the row the client built from the hovered
-	 * object, carrying the exact parameters it dispatches for a manual
-	 * click. Matching is by action family and identifier only (never by
-	 * rendered text, which carries color tags and translations).
-	 *
-	 * @return the native entry, or null when the current menu build carries
-	 *         no row for the object (e.g. the click opened away from the
-	 *         obstacle - the caller then falls back to the verified
-	 *         live-object scan)
-	 */
-	public static MenuEntry findNativeObstacleEntry(MenuEntry[] entries, int objectId)
+	/** Whether a clicked event is the OBSTACLE flavor of our entry. */
+	public static boolean matchesObstacleClick(MenuOptionClicked event)
 	{
-		for (MenuEntry entry : entries)
-		{
-			if (entry.getIdentifier() == objectId && isGameObjectVariant(entry.getType()))
-			{
-				return entry;
-			}
-		}
-		return null;
+		return isGameObjectVariant(event.getMenuAction())
+			&& event.getMenuOption().contains(MENU_MARKER);
 	}
 
 	/** The GAME_OBJECT action family (packet interaction types 3-6 and 1001). */
@@ -160,27 +174,53 @@ public final class CourseMenuEntries
 	}
 
 	/**
-	 * Pinning: swap our entry into the FIRST slot (index 0) of every menu
-	 * build - the TOP of the rendered menu, for visibility, and by the
-	 * client's ordering rules also the LEFT-CLICK DEFAULT action: a plain
-	 * left-click anywhere (hand or background-clicker forwarded) executes
-	 * the current step without opening the menu. That is this plugin's
-	 * intended operating mode - and it means every ordinary left-click on
-	 * the world executes the step action, which must be understood before
-	 * enabling the plugin.
+	 * Locates the client's OWN native obstacle row for the exact object id
+	 * in the live menu buffer: a {@code GAME_OBJECT_*} entry whose
+	 * identifier equals the id - the row the client built from the hovered
+	 * object, carrying the exact parameters it dispatches for a manual
+	 * click. Matching is by action family and identifier only (never by
+	 * rendered text, which carries color tags and translations). Present
+	 * only while the cursor's hover raycast includes the object; used at
+	 * menu-BUILD time so the injected row's parameters are verbatim copies
+	 * whenever available.
+	 *
+	 * @return the native entry, or null when the current build carries no
+	 *         row for the object (cursor away from the obstacle - the
+	 *         caller then derives the parameters from the live object)
+	 */
+	public static MenuEntry findNativeObstacleEntry(MenuEntry[] entries, int objectId)
+	{
+		for (MenuEntry entry : entries)
+		{
+			if (entry.getIdentifier() == objectId && isGameObjectVariant(entry.getType()))
+			{
+				return entry;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Pinning: swap our entry into the LAST array slot of every menu build -
+	 * the TOP-rendered, left-click-DEFAULT slot in this client (first-party
+	 * MenuEntrySwapper promotes entries with exactly this swap; index 0
+	 * renders at the BOTTOM, the inversion observed in the field). With the
+	 * pin on, every ordinary left-click while the plugin is enabled executes
+	 * the current step; disabling the pin (or the plugin) restores the
+	 * game's own default action.
 	 */
 	public static void pinToTop(Menu menu)
 	{
 		MenuEntry[] entries = menu.getMenuEntries();
 		int idx = findIndex(entries);
-		if (idx == -1 || idx == 0)
+		if (idx == -1 || idx == entries.length - 1)
 		{
 			return;
 		}
 
 		MenuEntry ours = entries[idx];
-		entries[idx] = entries[0];
-		entries[0] = ours;
+		entries[idx] = entries[entries.length - 1];
+		entries[entries.length - 1] = ours;
 		menu.setMenuEntries(entries);
 	}
 }

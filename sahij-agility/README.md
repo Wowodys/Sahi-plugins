@@ -50,7 +50,7 @@ Every dispatched action is the consequence of exactly one user click:
 - **TICK gate** — at most ONE dispatched click between two GameTicks. Two
   physical clicks in one tick produce at most one action.
 - **ARMED gate** — while a dispatched click still awaits server-confirmed
-  movement (bounded at 10 ticks), every further click is refused visibly.
+  movement (bounded at 3 ticks, ~1.8s), every further click is refused visibly.
   Clicks are strictly serial; spam can never become action spam.
 - **No autonomous path** — no scheduler, no loop, no retry. The sequence
   advances only on the two-condition rule below, and the Z-plane fallback
@@ -130,25 +130,39 @@ sahij-agility/
 ```
 hardware click (real mouse, or background-clicker forwarded)
   └─ client's own input pipeline → MenuOptionClicked on our injected entry
-       ├─ injected entry: client-local VISUAL row (RUNELITE type, no game
-       │   packet of its own), pinned to the FIRST slot (top) every build —
-       │   visible at the top of the right-click menu and, by the client's
-       │   ordering rules, the LEFT-CLICK DEFAULT action
+       ├─ entry flavor:
+       │    walk (step 1)     client-local row — consumed at click, destination
+       │                       dispatched into the scene walk state (the client's
+       │                       own walk processor; this client's walk arm sources
+       │                       its destination from the mouse hover tile)
+       │    obstacle (2–7)    REAL GAME_OBJECT action row — a valid
+       │                       LEFT-CLICK DEFAULT candidate, so forwarded clicks
+       │                       execute it WITHOUT the cursor hovering the tile
+       │                       (a RUNELITE-typed row is never a default
+       │                       candidate; with one pinned, left-clicks silently
+       │                       ran the native entry under the cursor instead —
+       │                       the hover-dependence bug)
+       ├─ parameters (the client's own, never hand-built):
+       │    native row present in the live build (cursor over the object) →
+       │      copied VERBATIM: type, identifier, param0/param1
+       │    otherwise (hover-independent) → the LIVE object's own
+       │      getSceneMinLocation() tile + the composition-bound action
+       │      variant (the min-location tile is what the client's rows
+       │      address actions to; addressing a multi-tile object's standing
+       │      tile instead gets dropped server-side as a silent no-op —
+       │      the step 6/7 timeout). Unresolvable → entry ABSENT, overlay
+       │      says why
+       ├─ pin (default on): swapped into the LAST array slot — the
+       │   TOP-rendered, LEFT-CLICK DEFAULT slot in this client
+       │   (first-party MenuEntrySwapper promotes entries with exactly this
+       │   swap; index 0 renders at the BOTTOM — swapping there pins to the
+       │   bottom, the inversion observed in the field)
        ├─ engine.clickGateReason() — 1:1 tick gate + armed gate; a gated
-       │   click is consumed so nothing executes
-       ├─ walk (step 1): consumed, destination dispatched into the scene
-       │   walk state (the client's own walk processor; the vanilla walk
-       │   arm would otherwise follow the mouse hover tile)
-       ├─ obstacle (2–7): SWAP & EXECUTE — locate the client's OWN native
-       │   obstacle row for the step's object in the live menu buffer and
-       │   dispatch it through the client's standard action method with the
-       │   native row's parameters copied VERBATIM (type, identifier,
-       │   param0/param1, option, target): byte-identical to a manual click
-       │   on the native row, with the client's standard range/pathfinding
-       │   handling. Fallback when the menu carries no native row (click
-       │   opened away from the object): verified live-object scan +
-       │   composition-bound verb, same client method. Never a guessed
-       │   dispatch; unresolvable clicks refuse visibly
+       │   click is consumed so the native arm cannot run it either
+       ├─ ungated obstacle click stays UNCONSUMED: the client's native
+       │   object arm executes the real entry after the event — its
+       │   approach routing, its packet, its UI trail. ZERO synthetic
+       │   dispatches (client.menuAction) exist in this module
        ├─ cursor bracket (MouseInfo X → zone index) records the human
        │   correlation and selected tile — telemetry only; it never alters
        │   the packet
@@ -194,6 +208,6 @@ in the config panel as **Sahij Agility** (disabled by default).
 |---|---|---|
 | `monitorWidth` | 2560 | Primary monitor NATIVE px width — the bracket domain. With Windows display scaling ≠ 100%, verify the right screen edge selects the last tile and adjust |
 | `regionGate` | true | Entry only while the player is in region 10806 |
-| `pinEntryToTop` | true | Entry pinned to the menu's first slot (top) for visibility — which also makes it the **left-click default**: every ordinary left-click executes the current step while enabled |
+| `pinEntryToTop` | true | Entry swapped into the LAST array slot — **top-rendered and the left-click default** in this client (first-party swapper semantics; index 0 = bottom). Every ordinary left-click executes the current step while enabled |
 | `requireStepTile` | false | Strict: refuse clicks unless standing on the step's own tiles |
 | `showOverlay` | true | The fail-visible status panel |
