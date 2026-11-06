@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<checkstyle version="8.3">
+<file name="C:\Users\sahij\Documents\kuri-plugin-dev\kuri-backgroundclicker\src\main\java\net\runelite\client\plugins\kuri\backgroundclicker\BackgroundClickerConfig.java">
+</file>
+<file name="C:\Users\sahij\Documents\kuri-plugin-dev\kuri-backgroundclicker\src\main\java\net\runelite\client\plugins\kuri\backgroundclicker\BackgroundClickerPlugin.java">
+</file>
+<file name="C:\Users\sahij\Documents\kuri-plugin-dev\kuri-backgroundclicker\src\main\java\net\runelite\client\plugins\kuri\backgroundclicker\clicker\CanvasClickInjector.java">
+</file>
+<file name="C:\Users\sahij\Documents\kuri-plugin-dev\kuri-backgroundclicker\src\main\java\net\runelite\client\plugins\kuri\backgroundclicker\clicker\SafeZoneMapper.java">
+</file>
+<file name="C:\Users\sahij\Documents\kuri-plugin-dev\kuri-backgroundclicker\src\main\java\net\runelite\client\plugins\kuri\backgroundclicker\hook\WinMouseHook.java">
+</file>
+<file name="C:\Users\sahij\Documents\kuri-plugin-dev\kuri-backgroundclicker\src\main\java\net\runelite\client\plugins\kuri\backgroundclicker\SafeZoneOverlay.java">
+</file>
+<file name="C:\Users\sahij\Documents\kuri-plugin-dev\kuri-backgroundclicker\src\main\java\net\runelite\client\plugins\kuri\backgroundclicker\StatusOverlay.java">
+</file>
+</checkstyle>

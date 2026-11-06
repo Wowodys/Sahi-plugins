@@ -1,0 +1,30 @@
+# sdk/jars — mirrored from the local RuneLite artifact repository by
+# tools/drift/check_drift.py --apply. The machine-readable pin lives in
+# tools/drift/sdk-pin.json; this file is regenerated on every sync — make
+# durable notes in docs/ instead of editing the generated section below.
+
+# pinned: runelite-api 1.13.6 | client 1.13.6 | kuri-runelite v1.7.64  (synced 2026-11-03T00:00:00+00:00)
+
+# >>> generated section (tools/drift/check_drift.py --apply)
+client-1.13.6.jar
+gson-2.8.5.jar
+guava-23.2-jre.jar
+guice-4.1.0-no_aop.jar
+http-api-1.2.26.jar
+javax.inject-1.jar
+okhttp-3.14.9.jar
+okio-1.17.2.jar
+runelite-api-1.13.6-runtime.jar
+slf4j-api-1.7.25.jar
+kuri/kuri-runelite-v1.7.64.jar
+# <<< generated section
+
+# Notes:
+# - runelite-api/client compile plugins standalone (class file major 55 = Java 11).
+# - The remaining jars are the client's compile-time libs (guice/guava/slf4j/okhttp/...).
+# - kuri/kuri-runelite-*.jar is Kuri's PROPRIETARY framework jar: included ONLY so
+#   tools/ConstDump.java and tools/EnumDump.java can run against decrypted Kuri
+#   plugin jars. Never link com.kuri.* from a plugin; never distribute this jar.
+# - If Gradle cannot find a JDK 11 toolchain, run it with
+#   -Dorg.gradle.java.installations.paths="C:\Program Files\Eclipse Adoptium\jdk-11.0.28.6-hotspot"
+#   (see sdk/jdk-notes.md).

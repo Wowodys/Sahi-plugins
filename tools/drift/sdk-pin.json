@@ -1,0 +1,23 @@
+{
+  "runeliteApi": "1.13.6",
+  "client": "1.13.6",
+  "kuriFramework": "v1.7.64",
+  "pinnedAt": "2026-11-03T00:00:00+00:00",
+  "pinnedAtEpochMs": 1793346000000,
+  "status": "ok",
+  "reason": null,
+  "needsHumanSince": null,
+  "needsHumanSinceEpochMs": null,
+  "lastCheck": "2026-11-03T18:43:25+00:00",
+  "lastCheckEpochMs": 1793731405708,
+  "lastCheckKind": "initial-pin",
+  "canary": {
+    "compiled": true,
+    "against": "1.13.6"
+  },
+  "policy": {
+    "staleWarnDays": 3,
+    "staleBlockDays": 14,
+    "autoApplyDefault": true
+  }
+}

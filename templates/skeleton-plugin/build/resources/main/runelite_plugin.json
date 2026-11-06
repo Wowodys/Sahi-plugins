@@ -1,0 +1,4 @@
+{
+  "displayName": "Template",
+  "plugins": ["com.example.template.TemplatePlugin"]
+}

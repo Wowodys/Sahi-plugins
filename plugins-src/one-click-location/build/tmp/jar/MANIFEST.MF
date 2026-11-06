@@ -1,0 +1,5 @@
+Manifest-Version: 1.0
+Implementation-Title: One-Click Location RuneLite plugin
+Implementation-Version: 1.0.0
+RuneLite-Plugin: com.example.oneclick.location.LocationClickPlugin
+

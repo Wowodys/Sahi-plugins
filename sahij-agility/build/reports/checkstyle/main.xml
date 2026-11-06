@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<checkstyle version="8.3">
+<file name="C:\Users\sahij\Documents\kuri-plugin-dev\sahij-agility\src\main\java\net\runelite\client\plugins\sahij\agility\engine\AgilityCourse.java">
+</file>
+<file name="C:\Users\sahij\Documents\kuri-plugin-dev\sahij-agility\src\main\java\net\runelite\client\plugins\sahij\agility\engine\AgilitySequenceEngine.java">
+</file>
+<file name="C:\Users\sahij\Documents\kuri-plugin-dev\sahij-agility\src\main\java\net\runelite\client\plugins\sahij\agility\engine\AgilityStep.java">
+</file>
+<file name="C:\Users\sahij\Documents\kuri-plugin-dev\sahij-agility\src\main\java\net\runelite\client\plugins\sahij\agility\engine\PlayerState.java">
+</file>
+<file name="C:\Users\sahij\Documents\kuri-plugin-dev\sahij-agility\src\main\java\net\runelite\client\plugins\sahij\agility\engine\StepTile.java">
+</file>
+<file name="C:\Users\sahij\Documents\kuri-plugin-dev\sahij-agility\src\main\java\net\runelite\client\plugins\sahij\agility\menu\CourseMenuEntries.java">
+</file>
+<file name="C:\Users\sahij\Documents\kuri-plugin-dev\sahij-agility\src\main\java\net\runelite\client\plugins\sahij\agility\overlay\AgilityStatusOverlay.java">
+</file>
+<file name="C:\Users\sahij\Documents\kuri-plugin-dev\sahij-agility\src\main\java\net\runelite\client\plugins\sahij\agility\SahijAgilityConfig.java">
+</file>
+<file name="C:\Users\sahij\Documents\kuri-plugin-dev\sahij-agility\src\main\java\net\runelite\client\plugins\sahij\agility\SahijAgilityPlugin.java">
+</file>
+<file name="C:\Users\sahij\Documents\kuri-plugin-dev\sahij-agility\src\main\java\net\runelite\client\plugins\sahij\agility\world\CourseValidator.java">
+</file>
+<file name="C:\Users\sahij\Documents\kuri-plugin-dev\sahij-agility\src\main\java\net\runelite\client\plugins\sahij\agility\world\RsCoordMath.java">
+</file>
+<file name="C:\Users\sahij\Documents\kuri-plugin-dev\sahij-agility\src\main\java\net\runelite\client\plugins\sahij\agility\world\ScreenZoneMapper.java">
+</file>
+</checkstyle>

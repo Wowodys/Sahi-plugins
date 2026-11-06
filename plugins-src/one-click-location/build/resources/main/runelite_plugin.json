@@ -1,0 +1,4 @@
+{
+  "displayName": "One-Click Location",
+  "plugins": ["com.example.oneclick.location.LocationClickPlugin"]
+}

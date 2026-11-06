@@ -1,0 +1,128 @@
+// One-Click Location plugin - offline build against the pinned SDK jars
+// in ../../sdk/jars (see sdk/jars/versions.txt). Same build shape as
+// templates/skeleton-plugin (Java 11 release, toolchain, drift guard).
+//
+// Build (from kuri-plugin-dev root):
+//   export JAVA_HOME="C:\Users\sahij\AppData\Local\RuneLite\jre"
+//   gradle build --no-daemon
+
+plugins {
+    id 'java'
+}
+
+group = 'com.example.oneclick'
+version = '1.0.0'
+
+def sdkJars = file(project.findProperty('sdkDir') ?: '../../sdk/jars')
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(11)
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 11
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    compileOnly fileTree(dir: sdkJars, include: ['*.jar'])
+}
+
+jar {
+    manifest {
+        attributes(
+            'Implementation-Title'  : 'One-Click Location RuneLite plugin',
+            'Implementation-Version': project.version,
+            'RuneLite-Plugin'       : 'com.example.oneclick.location.LocationClickPlugin'
+        )
+    }
+}
+
+tasks.withType(AbstractArchiveTask).configureEach {
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
+
+// SDK drift guard - identical to the template's (block leg of
+// tools/drift/check_drift.py). Relative depth is the same as the template,
+// so ../../tools/drift/sdk-pin.json resolves to the same pin file.
+def sdkGuardEnabled = project.findProperty('skipSdkGuard') != 'true'
+def allowStaleSdk = project.findProperty('allowStaleSdk') == 'true'
+def runeliteRepo = new File((project.findProperty('runeliteRepo') ?: (System.getProperty('user.home') + '/.runelite/repository2')).toString())
+def pinFile = rootProject.file('../../tools/drift/sdk-pin.json')
+
+tasks.register('checkSdkPin') {
+    onlyIf { sdkGuardEnabled }
+    doLast {
+        def numRe = ~/(\d+(?:\.\d+)+)/
+        def verOf = { String n -> def m = numRe.matcher(n); (m.find() ? m.group(1) : null) }
+        def asInts = { String v -> (v ?: '').split('\\.').findAll { it.isNumber() }*.toInteger() }
+        def cmpV = { String a, String b ->
+            def x = asInts(a), y = asInts(b), n = [x.size(), y.size()].max()
+            for (int i = 0; i < n; i++) {
+                int l = i < x.size() ? x[i] : 0, r = i < y.size() ? y[i] : 0
+                if (l != r) return l <=> r
+            }
+            0
+        }
+        def newestIn = { File dir, String prefix ->
+            def best = null
+            if (dir?.isDirectory()) {
+                dir.listFiles({ it.name.endsWith('.jar') } as FileFilter).each { f ->
+                    if (f.name.startsWith(prefix)) {
+                        def v = verOf(f.name)
+                        if (v && (best == null || cmpV(v, best[0]) > 0)) best = [v, f.name]
+                    }
+                }
+            }
+            best
+        }
+
+        def failures = []
+        def warnings = []
+
+        if (!pinFile.isFile()) {
+            warnings << 'sdk-pin.json missing - run: python tools/drift/check_drift.py (from the kuri-plugin-dev root)'
+        } else {
+            def pin = new groovy.json.JsonSlurper().parse(pinFile)
+            if (pin.status == 'needs_human' || pin.status == 'blocked') {
+                (allowStaleSdk ? warnings : failures) <<
+                    ("SDK pin status is '${pin.status}'" + (pin.reason ? " (${pin.reason})" : '') +
+                     ' - see tools/drift/DRIFT-REPORT.md, or build with -PallowStaleSdk=true')
+            }
+            def repoApi = newestIn(runeliteRepo, 'runelite-api-')
+            def repoClient = newestIn(runeliteRepo, 'client-')
+            if (repoApi && cmpV(repoApi[0], (String) pin.runeliteApi) > 0) {
+                (allowStaleSdk ? warnings : failures) <<
+                    "repository2 has runelite-api ${repoApi[0]} > pinned ${pin.runeliteApi} - run: python tools/drift/check_drift.py --apply"
+            }
+            if (repoClient && cmpV(repoClient[0], (String) pin.client) > 0) {
+                (allowStaleSdk ? warnings : failures) <<
+                    "repository2 has client ${repoClient[0]} > pinned ${pin.client} - run: python tools/drift/check_drift.py --apply"
+            }
+            def lastMs = pin.lastCheckEpochMs
+            if (lastMs) {
+                def ageDays = (System.currentTimeMillis() - (lastMs as long)) / 86400000.0d
+                def warnAfter = (pin.policy?.staleWarnDays ?: 3) as double
+                if (ageDays > warnAfter) {
+                    warnings << String.format('SDK pin last checked %.1f days ago - run: python tools/drift/check_drift.py --quick', ageDays)
+                }
+            }
+        }
+
+        warnings.each { println "WARNING(checkSdkPin): ${it}" }
+        if (failures) {
+            throw new GradleException(
+                'checkSdkPin FAILED - SDK drift unresolved (override: -PallowStaleSdk=true):\n  - ' +
+                failures.join('\n  - '))
+        }
+    }
+}
+
+tasks.named('compileJava') { dependsOn 'checkSdkPin' }
