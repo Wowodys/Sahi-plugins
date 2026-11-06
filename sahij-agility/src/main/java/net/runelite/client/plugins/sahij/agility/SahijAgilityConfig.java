@@ -104,21 +104,6 @@ public interface SahijAgilityConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "requireStepTile",
-		name = "Require standing on step tiles",
-		description = "Strict mode: refuse a step's click unless the player "
-			+ "stands on one of that step's own tiles (the spec's tile sets "
-			+ "are the documented standing areas). Off = plane agreement is "
-			+ "enough and off-tile standings are only logged",
-		position = 3,
-		section = behaviourSection
-	)
-	default boolean requireStepTile()
-	{
-		return false;
-	}
-
-	@ConfigItem(
 		keyName = "showOverlay",
 		name = "Show overlay",
 		description = "Display the status overlay panel (current step, zone "

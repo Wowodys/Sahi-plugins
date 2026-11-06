@@ -209,5 +209,4 @@ in the config panel as **Sahij Agility** (disabled by default).
 | `monitorWidth` | 2560 | Primary monitor NATIVE px width — the bracket domain. With Windows display scaling ≠ 100%, verify the right screen edge selects the last tile and adjust |
 | `regionGate` | true | Entry only while the player is in region 10806 |
 | `pinEntryToTop` | true | Entry swapped into the LAST array slot — **top-rendered and the left-click default** in this client (first-party swapper semantics; index 0 = bottom). Every ordinary left-click executes the current step while enabled |
-| `requireStepTile` | false | Strict: refuse clicks unless standing on the step's own tiles |
 | `showOverlay` | true | The fail-visible status panel |

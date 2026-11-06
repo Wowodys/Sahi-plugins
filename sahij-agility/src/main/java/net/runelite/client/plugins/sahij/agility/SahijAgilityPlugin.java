@@ -411,7 +411,7 @@ public class SahijAgilityPlugin extends Plugin
 			}
 			else
 			{
-				engine.refuseClick("direct walk dispatch unavailable in this client build");
+				engine.refuseClick("walk state busy or unavailable - click refused");
 			}
 			return true; // never re-run
 		});
@@ -438,6 +438,28 @@ public class SahijAgilityPlugin extends Plugin
 		}
 
 		AgilityStep step = engine.getCurrentStep();
+		PlayerState player = playerState();
+
+		// Click-time currency: the row was built at menu-build time; the
+		// engine may have advanced, reset or left the region since. The row
+		// still carries a real object's parameters, but a click for a step
+		// we are no longer on must not execute - consume it and refuse
+		// visibly, exactly like a gated click.
+		if (player == null || event.getId() != step.getObjectId())
+		{
+			event.consume();
+			engine.refuseClick("stale entry: clicked row is not step "
+				+ step.getNumber() + "'s object");
+			return;
+		}
+
+		if (player.getPlane() != step.getPlane())
+		{
+			event.consume();
+			engine.refuseClick("player on plane " + player.getPlane()
+				+ ", step " + step.getNumber() + " is on plane " + step.getPlane());
+			return;
+		}
 
 		// Cursor-bracket telemetry: records the human correlation and the
 		// selected tile index. It never alters what is dispatched - the
@@ -454,7 +476,7 @@ public class SahijAgilityPlugin extends Plugin
 		// performs the action after this event - the same routing, packet
 		// and UI trail as a manual click on the native row. One click in,
 		// one ordinary game action out; nothing is dispatched from here.
-		engine.recordClick(engine.getStepIndex(), tileIndex, mouseX, playerState());
+		engine.recordClick(engine.getStepIndex(), tileIndex, mouseX, player);
 	}
 
 	/**

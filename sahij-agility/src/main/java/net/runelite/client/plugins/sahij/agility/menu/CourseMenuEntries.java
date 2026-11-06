@@ -70,12 +70,23 @@ import net.runelite.client.plugins.sahij.agility.engine.AgilityStep;
  *
  * One marker constant is used in every place the entry is touched:
  * injection option text, the dedup guard, the pin finder and the click
- * matchers (drift between them is the classic silent bug).
+ * matchers (drift between them is the classic silent bug). Every match is
+ * an EXACT-prefix test against the injected option's colored prefix -
+ * never a loose substring - so a third-party entry that merely contains
+ * the marker word can never be deduped, pinned, consumed or intercepted
+ * by this class.
  */
 public final class CourseMenuEntries
 {
 	/** The single marker for injection, dedup, pinning and click matching. */
 	public static final String MENU_MARKER = "Sahij";
+
+	/**
+	 * The exact colored prefix every injected option starts with; all
+	 * identity checks (dedup, pin, click matching) test against this whole
+	 * prefix, never a bare substring of it.
+	 */
+	private static final String MENU_PREFIX = "<col=8532cb>" + MENU_MARKER + "</col>";
 
 	private CourseMenuEntries()
 	{
@@ -84,7 +95,7 @@ public final class CourseMenuEntries
 	/** The rendered option text for a step, e.g. "Sahij 3: Jump Gap". */
 	public static String optionFor(AgilityStep step)
 	{
-		return "<col=8532cb>" + MENU_MARKER + "</col> " + step.getNumber() + ": "
+		return MENU_PREFIX + " " + step.getNumber() + ": "
 			+ step.getAction()
 			+ (step.getTarget().isEmpty() ? "" : " " + step.getTarget());
 	}
@@ -100,7 +111,7 @@ public final class CourseMenuEntries
 	{
 		for (int i = 0; i < entries.length; i++)
 		{
-			if (entries[i].getOption().contains(MENU_MARKER))
+			if (entries[i].getOption().startsWith(MENU_PREFIX))
 			{
 				return i;
 			}
@@ -153,14 +164,14 @@ public final class CourseMenuEntries
 	public static boolean matchesWalkClick(MenuOptionClicked event)
 	{
 		return event.getMenuAction() == MenuAction.RUNELITE
-			&& event.getMenuOption().contains(MENU_MARKER);
+			&& event.getMenuOption().startsWith(MENU_PREFIX);
 	}
 
 	/** Whether a clicked event is the OBSTACLE flavor of our entry. */
 	public static boolean matchesObstacleClick(MenuOptionClicked event)
 	{
 		return isGameObjectVariant(event.getMenuAction())
-			&& event.getMenuOption().contains(MENU_MARKER);
+			&& event.getMenuOption().startsWith(MENU_PREFIX);
 	}
 
 	/** The GAME_OBJECT action family (packet interaction types 3-6 and 1001). */
