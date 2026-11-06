@@ -1,3 +1,5 @@
+quick start - Navigate to /runelite and enter this into terminal : ./gradlew :client:run --args="--debug --developer-mode"
+
 # kuri-plugin-dev — Local Development Environment for RuneLite "One-Click" Plugins
 
 Self-contained folder for (a) building standalone RuneLite plugins in the
