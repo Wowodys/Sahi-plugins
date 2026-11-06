@@ -155,8 +155,9 @@ public final class AgilitySequenceEngine
 	/**
 	 * One server observation per GameTick, in order: the tick gate turns
 	 * over, the Z-plane safety fallback runs first (a fall outranks
-	 * everything), then position sync, then armed-click confirmation against
-	 * the same snapshot.
+	 * everything), then armed-click confirmation, then arrival-based step
+	 * matching - so a landing that confirms a click AND advances the step
+	 * ends the tick with the transition as the visible outcome.
 	 */
 	public void observe(PlayerState now)
 	{
@@ -183,7 +184,36 @@ public final class AgilitySequenceEngine
 			return;
 		}
 
-		// 2. Step matching on WORLD BOUNDS + PLANE ONLY (chunk-blind): the
+		// 2. Armed-click confirmation against the same snapshot: any tile or
+		// plane change since dispatch = the server accepted the action. Runs
+		// BEFORE the arrival block on purpose: when the landing both confirms
+		// the click AND crosses into the next step's bounds, the transition
+		// outcome ("advanced: dispatched click + arrival") must be the final
+		// visible label for that tick.
+		if (armed)
+		{
+			if (!now.sameTile(armedAt))
+			{
+				armed = false;
+				stepsConfirmed++;
+				lastOutcome = "confirmed: step " + (armedStepIndex + 1)
+					+ " click accepted (" + armedAt + " -> " + now + ")";
+			}
+			else
+			{
+				pendingTicks++;
+				if (pendingTicks >= CONFIRM_HORIZON_TICKS)
+				{
+					armed = false;
+					clicksAborted++;
+					lastOutcome = "aborted: no movement within "
+						+ CONFIRM_HORIZON_TICKS + " ticks of step "
+						+ (armedStepIndex + 1) + " click";
+				}
+			}
+		}
+
+		// 3. Step matching on WORLD BOUNDS + PLANE ONLY (chunk-blind): the
 		// last step whose ARRIVAL AREA contains the player. Forward
 		// advancement to the successor additionally requires the dispatched-
 		// click fact for the current step; any other placement change is a
@@ -217,31 +247,6 @@ public final class AgilitySequenceEngine
 		else if (arrivalIndex != -1)
 		{
 			synced = true;
-		}
-
-		// 3. Armed-click confirmation against the same snapshot: any tile or
-		// plane change since dispatch = the server accepted the action.
-		if (armed)
-		{
-			if (!now.sameTile(armedAt))
-			{
-				armed = false;
-				stepsConfirmed++;
-				lastOutcome = "confirmed: step " + (armedStepIndex + 1)
-					+ " click accepted (" + armedAt + " -> " + now + ")";
-			}
-			else
-			{
-				pendingTicks++;
-				if (pendingTicks >= CONFIRM_HORIZON_TICKS)
-				{
-					armed = false;
-					clicksAborted++;
-					lastOutcome = "aborted: no movement within "
-						+ CONFIRM_HORIZON_TICKS + " ticks of step "
-						+ (armedStepIndex + 1) + " click";
-				}
-			}
 		}
 	}
 

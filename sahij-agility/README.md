@@ -53,9 +53,36 @@ Every dispatched action is the consequence of exactly one user click:
   movement (bounded at 10 ticks), every further click is refused visibly.
   Clicks are strictly serial; spam can never become action spam.
 - **No autonomous path** — no scheduler, no loop, no retry. The sequence
-  advances only when the server moves the player onto the next step's
-  tiles (position sync), and the Z-plane fallback (plane → 0 during steps
-  3–5) resets to step 1 immediately.
+  advances only on the two-condition rule below, and the Z-plane fallback
+  (plane → 0 during steps 3–5) resets to step 1 immediately.
+
+## Step transitions (world bounds + plane — chunk-blind)
+
+Step progression never consults chunk ids. Chunks on this course change
+mid-obstacle (right between the step-2 wall climb and the step-3 gap), so a
+chunk-matched gate strands the machine — chunk ids exist on the step
+definitions as metadata only (the once-per-login identity check reports on
+the definition and gates nothing).
+
+A step is current while the player stands in its **arrival area**: the
+bounding box of the step's documented tiles widened by
+`ARRIVAL_MARGIN_TILES` (2) on each side, matched on the step's plane — pure
+world coordinates + Z level. Obstacle landings routinely fall a tile or two
+outside a documented tile set; the margin absorbs that (verified: all seven
+arrival areas stay disjoint per plane at margin 2).
+
+A **forward transition** (step k → its successor) requires BOTH:
+
+1. a click for step k was dispatched (`recordClick` while k was current), and
+2. the player's server-reported location entered the successor's arrival
+   area on its plane.
+
+Any other placement change (manual walk-back, login mid-course, recovery
+from an unwatched step-6/7 fall) is a **positional resync** — visibly
+labeled, never counted as a confirmed step, never a dispatch, and never
+stuck. The world-layer obstacle scan uses the same widened bounds (exact
+object-id match, no substitutions), so the click path cannot strand on the
+same geometry the transition logic no longer trusts.
 
 ## Module layout
 
@@ -132,13 +159,18 @@ in the config panel as **Sahij Agility** (disabled by default).
 
 ## Verification
 
-- `:sahij-agility:compileJava` + `:sahij-agility:checkstyleMain` — clean,
-  class files major 55 (Java 11).
-- Pure-engine harness (86 checks, 0 failures): course shape vs the spec
+- `:sahij-agility:build` — clean; checkstyle 0 violations; class files
+  major 55 (Java 11).
+- Pure-engine harness (101 checks, 0 failures): course shape vs the spec
   table (tile counts 1/1/12/1/3/3/2, object ids, chunk ids, plane-watch
   flags), region/chunk arithmetic, zone-boundary math (2560/12 → first
-  pixel of bracket 1 is 214, clamps, N=1), full-lap position sync including
-  the mid-rope hold and the step-7 lap close, the plane-drop fallback
+  pixel of bracket 1 is 214, clamps, N=1), arrival-area matching (margin
+  accept/reject, wrong-plane rejection), **the step-2→3 bug scenario**
+  (dispatched climb + landing outside the documented tiles advances;
+  a landing in a *different chunk* advances identically — chunk-blind),
+  dispatch-gated forward vs labeled positional resync, full-lap walkthrough
+  with a dispatched click per obstacle (including the mid-rope hold and the
+  step-7 lap close, 6/6 movement confirmations), the plane-drop fallback
   (armed and unarmed, steps 3–5 only — step 2 correctly exempt), and the
   1:1 gates (tick gate, armed gate, same-tick double click, dead-click
   bounded abort, refusal while a dispatch is pending).
